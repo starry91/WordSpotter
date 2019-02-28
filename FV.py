@@ -14,9 +14,13 @@ from sklearn.decomposition import PCA
 import os
 import xml.etree.ElementTree as ET
 from sklearn.metrics.pairwise import cosine_similarity
+import timeit
 from sklearn.metrics import label_ranking_average_precision_score
+import pickle
+import copy
 
 pca_obj = None
+load_gmm_flag = True
 
 def dictionary(descriptors, N):
     '''
@@ -34,9 +38,11 @@ def image_descriptors(file):
     '''
     try:
         img = cv2.imread(file, 0)
+        # img = cv2.resize(img, (256, 256))
+        # _, descriptors = cv2.xfeatures2d.SIFT_create(
+        #     nfeatures=50).detectAndCompute(img, None)
         img = cv2.resize(img, (256, 256))
-        _, descriptors = cv2.xfeatures2d.SIFT_create(
-            nfeatures=50).detectAndCompute(img, None)
+        _, descriptors = cv2.xfeatures2d.SIFT_create().detectAndCompute(img, None)
         return descriptors
     except:
         print(file)
@@ -66,7 +72,8 @@ def likelihood_statistics(samples, means, covs, weights):
     '''
     gaussians, s0, s1, s2 = {}, {}, {}, {}
 
-    g = [multivariate_normal(mean=means[k], cov=covs[k], allow_singular=False) for k in range(0, len(weights))]
+    g = [multivariate_normal(mean=means[k], cov=covs[k],
+                             allow_singular=False) for k in range(0, len(weights))]
     for index, x in enumerate(samples):
         gaussians[index] = np.array([g_k.pdf(x) for g_k in g])
     for k in range(0, len(weights)):
@@ -94,9 +101,9 @@ def fisher_vector_sigma(s0, s1, s2, means, sigma, w, T):
 
 def normalize(fisher_vector):
     '''
-    Power Normalization
+    Power and L2 Normalization
     '''
-    v = np.sqrt(abs(fisher_vector)) * np.sign(fisher_vector)
+    v = np.multiply(np.sqrt(abs(fisher_vector)), np.sign(fisher_vector))
     return v / np.sqrt(np.dot(v, v))
 
 
@@ -104,11 +111,13 @@ def fisher_vector(samples, means, covs, w):
     '''
     Building the FV for a image, sample denotes a list of SIFT feature vectors
     '''
-    global pca_obj
-    samples = pca_obj.transform(samples)
+    # global pca_obj
+    samples = reduceDimensions(samples)
+    # samples = pca_obj.transform(samples)
     s0, s1, s2 = likelihood_statistics(samples, means, covs, w)
     T = samples.shape[0]
-    covs = np.float32([np.diagonal(covs[k]) for k in range(0, covs.shape[0])])
+    covs = np.float32([np.diagonal(covs[k])
+                       for k in range(0, covs.shape[0])])
     a = fisher_vector_weights(s0, s1, s2, means, covs, w, T)
     b = fisher_vector_means(s0, s1, s2, means, covs, w, T)
     c = fisher_vector_sigma(s0, s1, s2, means, covs, w, T)
@@ -119,16 +128,30 @@ def fisher_vector(samples, means, covs, w):
     # print(fv)
     return np.array(fv)
 
+
 def reduceDimensions(words):
     '''
     Using PCA to reduce dimensions
     '''
     global pca_obj
-    if(pca_obj is None):
-        pca = PCA(n_components=10)
-        pca_obj = pca.fit(words)
-    res = pca_obj.transform(words)
-    return res
+    global load_gmm_flag
+    print(words.shape)
+    if(load_gmm_flag):
+        with open("./aman/pca_dump", 'rb') as handle:
+            pca_obj = pickle.load(handle)
+    print("pca obj")
+    print(pca_obj)  
+    try:
+        if(pca_obj is None):
+            pca = PCA(n_components=64)
+            pca_obj = pca.fit(words)
+            with open("./pca_dump", 'wb') as handle:
+                pickle.dump(pca_obj, handle, protocol=pickle.HIGHEST_PROTOCOL)  
+        res = pca_obj.transform(words)
+        return res
+    except:
+        print("error in Reduce Dimensions")
+        print("words shape: {0}".format(words.shape))
 
 
 def generate_gmm(input_folder, N):
@@ -167,7 +190,8 @@ def get_fisher_vectors_from_folder(folder, gmm):
         if(temp is not None):
             # print(temp)
             # print(os.path.basename(file))
-            res[os.path.basename(file)] = np.float32(fisher_vector(temp, *gmm))
+            res[os.path.basename(file)] = np.float32(
+                fisher_vector(temp, *gmm))
     return res
     # return np.float32([fisher_vector(image_descriptors(file), *gmm) for file in files])
 
@@ -196,8 +220,10 @@ def train(gmm, features):
     clf.fit(X, Y)
     return clf
 
+
 def compare(features):
     pass
+
 
 def success_rate(classifier, features):
     '''
@@ -216,25 +242,13 @@ def load_gmm(folder=""):
     '''
     Not used
     '''
+    print("in load gmm")
+    print(folder)
     files = ["means.gmm.npy", "covs.gmm.npy", "weights.gmm.npy"]
-    return map(lambda file: load(file), map(lambda s: folder + "/", files))
+    res = map(lambda file: np.load(file), map(lambda s: folder + "/" + s, files))
+    # print(list(res))
+    return res
 
-
-def get_args():
-    '''
-    Getting the command line arguments
-    '''
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '-d', "--dir", help="Directory with images", default='.')
-    parser.add_argument(
-        '-dxml', "--dirxml", help="Directory with xml", default='.')
-    parser.add_argument("-g", "--loadgmm", help="Load Gmm dictionary",
-                        action='store_true', default=False)
-    parser.add_argument(
-        '-n', "--number", help="Number of words in dictionary", default=5, type=int)
-    args = parser.parse_args()
-    return args
 
 def get_word_strings_from_file(file_path):
     '''
@@ -251,6 +265,7 @@ def get_word_strings_from_file(file_path):
             res[id+".png"] = word_string
     return res
 
+
 def extractWordStrings(folder_path):
     '''
     Extracting the word strings from all the xml files present in the folder
@@ -259,40 +274,136 @@ def extractWordStrings(folder_path):
     folders = glob.glob(folder_path + "/*.xml")
     for file in folders:
         word_strings.update(get_word_strings_from_file(file))
-    return word_strings    
+    return word_strings
+
 
 def get_word_string(path):
     pass
+
 
 def MAPScore(query_path, word_strings_dict, fisher_features, gmm):
     '''
     Getting the MAP score for the given image query
     '''
     query_sift_features = image_descriptors(query_path)
-    query_FV = fisher_vector(query_sift_features, *gmm)
-    query_FV = query_FV.reshape(1,-1)
-    similarity_score = cosine_similarity(query_FV, np.array(list(fisher_features.values())))
+    print(query_sift_features)
+    temp = copy.deepcopy(gmm)
+    query_FV = fisher_vector(query_sift_features, *temp)
+    query_FV = query_FV.reshape(1, -1)
+    similarity_score = cosine_similarity(
+        query_FV, np.array(list(fisher_features.values())))
     query_string = word_strings_dict[os.path.basename(query_path)]
-    word_vals = np.array([word_strings_dict[your_key] for your_key in fisher_features.keys()])
+    word_vals = np.array([word_strings_dict[your_key]
+                          for your_key in fisher_features.keys()])
     word_vals = word_vals.flatten()
-    y_true = np.array([[int(1) if s == query_string else int(0) for s in word_vals]])
+    y_true = np.array([[int(1) if s == query_string else int(0)
+                        for s in word_vals]])
     map = label_ranking_average_precision_score(y_true, similarity_score)
     return map
 
-if __name__ == '__main__':
-    args = get_args()
-    working_folder = args.dir
-    print(working_folder)
-    print("no. of weights {0}".format(args.number))
-    gmm = load_gmm(working_folder) if args.loadgmm else generate_gmm(
-        working_folder, args.number)
+
+def get_args():
+    '''
+    Getting the command line arguments
+    '''
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '-d', "--dir", help="Directory with images", default='.')
+    parser.add_argument(
+        '-dxml', "--dirxml", help="Directory with xml", default='.')
+    parser.add_argument("-g", "--loadgmm", help="Load Gmm dictionary",
+                        action='store_true', default=False)
+    parser.add_argument(
+        '-n', "--number", help="Number of words in dictionary", default=16, type=int)
+    args = parser.parse_args()
+    return args
+
+# working_folder = "/home/praveen/Desktop/iiith-assignments/CV/project/words/a01/testing"
+# dir_xml = "/home/praveen/Desktop/iiith-assignments/CV/project/words/a01/xml_testing/"
+# print(working_folder)
+# no_gaussians = 16
+# print("no. of weights {0}".format(no_gaussians))
+# start = timeit.default_timer()
+# load_gmm = False
+# gmm = load_gmm(working_folder) if load_gmm else generate_gmm(
+#     working_folder, no_gaussians)
+# stop = timeit.default_timer()
+# print('Time taken for training GMM: ', stop - start)
+# fisher_features = fisher_features(working_folder, gmm)
+# with open("./FV_dump", 'wb') as handle:
+#     pickle.dump(fisher_features, handle, protocol=pickle.HIGHEST_PROTOCOL)
+# word_strings_dict = extractWordStrings(dir_xml)
+# with open("./word_string_dict_dump", 'wb') as handle:
+#     pickle.dump(word_strings_dict, handle,
+#                 protocol=pickle.HIGHEST_PROTOCOL)
+# scores = []
+# while(True):
+#     query_path = input("Enter query image path: ")
+#     if(query_path == "break"):
+#         break
+#     score = MAPScore(query_path, word_strings_dict, fisher_features, gmm)
+#     scores.append(score)
+#     print(score)
+
+
+working_folder = "/home/praveen/Desktop/iiith-assignments/CV/project/words/a01/testing"
+dir_xml = "/home/praveen/Desktop/iiith-assignments/CV/project/words/a01/xml_testing/"
+load_folder = "/home/praveen/Desktop/iiith-assignments/CV/project/aman"
+print(working_folder)
+no_gaussians = 16
+print("no. of weights {0}".format(no_gaussians))
+start = timeit.default_timer()
+gmm = load_gmm(load_folder) if load_gmm_flag else generate_gmm(working_folder, no_gaussians)
+stop = timeit.default_timer()
+print('Time taken for training GMM: ', stop - start)
+# a,b,c = *gmm
+print("gmm: {0}".format(gmm))
+
+fisher_features = None
+if(load_gmm_flag):
+    with open("./aman/FV_dump", 'rb') as handle:
+        fisher_features = pickle.load(handle)
+else:
     fisher_features = fisher_features(working_folder, gmm)
-    word_strings_dict = extractWordStrings(args.dirxml)
-    scores = []
-    while(True):
-        query_path = input("Enter query image path: ")
-        if(query_path == "break"):
-            break
-        score = MAPScore(query_path, word_strings_dict, fisher_features, gmm)
-        scores.append(score)
-        print(score)
+    with open("./FV_dump", 'wb') as handle:
+        pickle.dump(fisher_features, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+word_strings_dict = None
+if(load_gmm_flag):
+    with open("./aman/word_string_dict_dump", 'rb') as handle:
+        word_strings_dict = pickle.load(handle)
+else:
+    word_strings_dict = extractWordStrings(dir_xml)
+    with open("./word_string_dict_dump", 'wb') as handle:
+        pickle.dump(word_strings_dict, handle,
+                    protocol=pickle.HIGHEST_PROTOCOL)
+scores = []
+while(True):
+    query_path = input("Enter query image path: ")
+    if(query_path == "break"):
+        break
+    score = MAPScore(query_path, word_strings_dict, fisher_features, gmm)
+    scores.append(score)
+    print(score)
+
+
+# if __name__ == '__main__':
+#     args = get_args()
+#     working_folder = args.dir
+#     print(working_folder)
+#     print("no. of weights {0}".format(args.number))
+#     start = timeit.default_timer()
+#     gmm = load_gmm(working_folder) if args.loadgmm else generate_gmm(
+#         working_folder, args.number)
+#     stop = timeit.default_timer()
+#     print('Time taken for training GMM: ', stop - start)
+#     fisher_features = fisher_features(working_folder, gmm)
+#     word_strings_dict = extractWordStrings(args.dirxml)
+#     scores = []
+#     while(True):
+#         query_path = input("Enter query image path: ")
+#         if(query_path == "break"):
+#             break
+#         score = MAPScore(query_path, word_strings_dict, fisher_features, gmm)
+#         scores.append(score)
+#         print(score)
