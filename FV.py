@@ -1,5 +1,3 @@
-# Author: Jacob Gildenblat, 2014
-# License: you may use this for whatever you like
 import sys
 import glob
 import argparse
@@ -18,6 +16,7 @@ import timeit
 from sklearn.metrics import label_ranking_average_precision_score
 import pickle
 import copy
+import matplotlib.pyplot as plt
 
 pca_obj = None
 load_gmm_flag = True
@@ -135,23 +134,27 @@ def reduceDimensions(words):
     '''
     global pca_obj
     global load_gmm_flag
-    print(words.shape)
-    if(load_gmm_flag):
-        with open("./aman/pca_dump", 'rb') as handle:
-            pca_obj = pickle.load(handle)
-    print("pca obj")
-    print(pca_obj)  
+    # print(words.shape)
+    # if(load_gmm_flag):
+    #     with open("/home/praveen/Desktop/iiith-assignments/CV/project/35k_weights/pca_dump", 'rb') as handle:
+    #         pca_obj = pickle.load(handle)
     try:
         if(pca_obj is None):
             pca = PCA(n_components=64)
             pca_obj = pca.fit(words)
             with open("./pca_dump", 'wb') as handle:
-                pickle.dump(pca_obj, handle, protocol=pickle.HIGHEST_PROTOCOL)  
+                pickle.dump(pca_obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
         res = pca_obj.transform(words)
         return res
     except:
         print("error in Reduce Dimensions")
         print("words shape: {0}".format(words.shape))
+
+
+def loadPCA(path):
+    global pca_obj
+    with open(path + "/pca_dump", 'rb') as handle:
+        pca_obj = pickle.load(handle)
 
 
 def generate_gmm(input_folder, N):
@@ -207,6 +210,29 @@ def fisher_features(folder, gmm):
     return res
 
 
+def get_image_mapping_from_folder(folder):
+    '''
+    Getting the Image Name to absolute path mapping
+    '''
+    files = glob.glob(folder + "/*.png")
+    res = {}
+    for file in files:
+        res[os.path.basename(file)] = os.path.abspath(file)
+    return res
+    # return np.float32([fisher_vector(image_descriptors(file), *gmm) for file in files])
+
+
+def get_image_mappings(folder):
+    '''
+    Getting the Image Name to absolute path mapping recursively
+    '''
+    folders = glob.glob(folder + "/*")
+    res = {}
+    for f in folders:
+        res.update(get_image_mapping_from_folder(f))
+    return res
+
+
 def train(gmm, features):
     '''
     Not used
@@ -245,7 +271,8 @@ def load_gmm(folder=""):
     print("in load gmm")
     print(folder)
     files = ["means.gmm.npy", "covs.gmm.npy", "weights.gmm.npy"]
-    res = map(lambda file: np.load(file), map(lambda s: folder + "/" + s, files))
+    res = map(lambda file: np.load(file), map(
+        lambda s: folder + "/" + s, files))
     # print(list(res))
     return res
 
@@ -281,17 +308,32 @@ def get_word_string(path):
     pass
 
 
-def MAPScore(query_path, word_strings_dict, fisher_features, gmm):
+def MAPScore(query_path, word_strings_dict, fisher_features, gmm, image_mapping_dict):
     '''
     Getting the MAP score for the given image query
     '''
+    img = plt.imread(query_path)
+    imgplot = plt.imshow(img)
+    plt.show()
     query_sift_features = image_descriptors(query_path)
-    print(query_sift_features)
+    print(fisher_features["a01-000u-00-01.png"])
     temp = copy.deepcopy(gmm)
     query_FV = fisher_vector(query_sift_features, *temp)
+    print(query_FV)
     query_FV = query_FV.reshape(1, -1)
-    similarity_score = cosine_similarity(
-        query_FV, np.array(list(fisher_features.values())))
+    FV_values = np.array(list(fisher_features.values()))
+    FV_keys = np.array(list(fisher_features.keys()))
+    similarity_score = cosine_similarity(query_FV, FV_values)
+    print(similarity_score.shape)
+    max_index = np.argmax(similarity_score)
+    top_5_indices = similarity_score.flatten().argsort()[-5:][::-1]
+    print("top 5 indices {0}".format(top_5_indices))
+    for i in top_5_indices:
+        match_img_path = image_mapping_dict[FV_keys[i]]
+        print("Matching image path: {0}".format(match_img_path))
+        img = plt.imread(match_img_path)
+        imgplot = plt.imshow(img)
+        plt.show()
     query_string = word_strings_dict[os.path.basename(query_path)]
     word_vals = np.array([word_strings_dict[your_key]
                           for your_key in fisher_features.keys()])
@@ -318,92 +360,51 @@ def get_args():
     args = parser.parse_args()
     return args
 
-# working_folder = "/home/praveen/Desktop/iiith-assignments/CV/project/words/a01/testing"
-# dir_xml = "/home/praveen/Desktop/iiith-assignments/CV/project/words/a01/xml_testing/"
-# print(working_folder)
-# no_gaussians = 16
-# print("no. of weights {0}".format(no_gaussians))
-# start = timeit.default_timer()
-# load_gmm = False
-# gmm = load_gmm(working_folder) if load_gmm else generate_gmm(
-#     working_folder, no_gaussians)
-# stop = timeit.default_timer()
-# print('Time taken for training GMM: ', stop - start)
-# fisher_features = fisher_features(working_folder, gmm)
-# with open("./FV_dump", 'wb') as handle:
-#     pickle.dump(fisher_features, handle, protocol=pickle.HIGHEST_PROTOCOL)
-# word_strings_dict = extractWordStrings(dir_xml)
-# with open("./word_string_dict_dump", 'wb') as handle:
-#     pickle.dump(word_strings_dict, handle,
-#                 protocol=pickle.HIGHEST_PROTOCOL)
-# scores = []
-# while(True):
-#     query_path = input("Enter query image path: ")
-#     if(query_path == "break"):
-#         break
-#     score = MAPScore(query_path, word_strings_dict, fisher_features, gmm)
-#     scores.append(score)
-#     print(score)
 
 
-working_folder = "/home/praveen/Desktop/iiith-assignments/CV/project/words/a01/testing"
-dir_xml = "/home/praveen/Desktop/iiith-assignments/CV/project/words/a01/xml_testing/"
-load_folder = "/home/praveen/Desktop/iiith-assignments/CV/project/aman"
+####################################     Main     #####################################
+
+working_folder = "/home/praveen/Desktop/iiith-assignments/CV/project/kaggle_data_35k/a01"
+dir_xml = "/home/praveen/Desktop/iiith-assignments/CV/project/kaggle_data_35k/xml_testing/"
+load_folder = "/home/praveen/Desktop/iiith-assignments/CV/project/35k_weights"
+
 print(working_folder)
 no_gaussians = 16
 print("no. of weights {0}".format(no_gaussians))
 start = timeit.default_timer()
-gmm = load_gmm(load_folder) if load_gmm_flag else generate_gmm(working_folder, no_gaussians)
+gmm = load_gmm(load_folder) if load_gmm_flag else generate_gmm(
+    working_folder, no_gaussians)
 stop = timeit.default_timer()
 print('Time taken for training GMM: ', stop - start)
-# a,b,c = *gmm
 print("gmm: {0}".format(gmm))
 
-fisher_features = None
+FV_features = None
 if(load_gmm_flag):
-    with open("./aman/FV_dump", 'rb') as handle:
-        fisher_features = pickle.load(handle)
+    loadPCA(load_folder)
+if(load_gmm_flag):
+    with open(load_folder + "/FV_dump", 'rb') as handle:
+        FV_features = pickle.load(handle)
 else:
-    fisher_features = fisher_features(working_folder, gmm)
+    FV_features = fisher_features(working_folder, gmm)
     with open("./FV_dump", 'wb') as handle:
         pickle.dump(fisher_features, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 word_strings_dict = None
 if(load_gmm_flag):
-    with open("./aman/word_string_dict_dump", 'rb') as handle:
+    with open(load_folder + "/word_string_dict_dump", 'rb') as handle:
         word_strings_dict = pickle.load(handle)
 else:
     word_strings_dict = extractWordStrings(dir_xml)
     with open("./word_string_dict_dump", 'wb') as handle:
         pickle.dump(word_strings_dict, handle,
                     protocol=pickle.HIGHEST_PROTOCOL)
+image_mapping_dict = get_image_mappings(working_folder)
 scores = []
 while(True):
     query_path = input("Enter query image path: ")
     if(query_path == "break"):
         break
-    score = MAPScore(query_path, word_strings_dict, fisher_features, gmm)
+    score = MAPScore(query_path, word_strings_dict,
+                     FV_features, gmm, image_mapping_dict)
     scores.append(score)
     print(score)
-
-
-# if __name__ == '__main__':
-#     args = get_args()
-#     working_folder = args.dir
-#     print(working_folder)
-#     print("no. of weights {0}".format(args.number))
-#     start = timeit.default_timer()
-#     gmm = load_gmm(working_folder) if args.loadgmm else generate_gmm(
-#         working_folder, args.number)
-#     stop = timeit.default_timer()
-#     print('Time taken for training GMM: ', stop - start)
-#     fisher_features = fisher_features(working_folder, gmm)
-#     word_strings_dict = extractWordStrings(args.dirxml)
-#     scores = []
-#     while(True):
-#         query_path = input("Enter query image path: ")
-#         if(query_path == "break"):
-#             break
-#         score = MAPScore(query_path, word_strings_dict, fisher_features, gmm)
-#         scores.append(score)
-#         print(score)
