@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 pca_obj = None
 load_gmm_flag = True
 
+
 def dictionary(descriptors, N):
     '''
     Dictionary of SIFT features using GMM
@@ -60,8 +61,8 @@ def likelihood_moment(x, ytk, moment):
     '''
     Calculating the likelihood moments
     '''
-    x_moment = np.power(np.float32(
-        x), moment) if moment > 0 else np.float32([1])
+    x_moment = np.power(np.float(
+        x), moment) if moment > 0 else np.float([1])
     return x_moment * ytk
 
 
@@ -87,15 +88,15 @@ def likelihood_statistics(samples, means, covs, weights):
 
 
 def fisher_vector_weights(s0, s1, s2, means, covs, w, T):
-    return np.float32([((s0[k] - T * w[k]) / np.sqrt(w[k])) for k in range(0, len(w))])
+    return np.float([((s0[k] - T * w[k]) / np.sqrt(w[k])) for k in range(0, len(w))])
 
 
 def fisher_vector_means(s0, s1, s2, means, sigma, w, T):
-    return np.float32([(s1[k] - means[k] * s0[k]) / (np.sqrt(w[k] * sigma[k])) for k in range(0, len(w))])
+    return np.float([(s1[k] - means[k] * s0[k]) / (np.sqrt(w[k] * sigma[k])) for k in range(0, len(w))])
 
 
 def fisher_vector_sigma(s0, s1, s2, means, sigma, w, T):
-    return np.float32([(s2[k] - 2 * means[k]*s1[k] + (means[k]*means[k] - sigma[k]) * s0[k]) / (np.sqrt(2*w[k])*sigma[k]) for k in range(0, len(w))])
+    return np.float([(s2[k] - 2 * means[k]*s1[k] + (means[k]*means[k] - sigma[k]) * s0[k]) / (np.sqrt(2*w[k])*sigma[k]) for k in range(0, len(w))])
 
 
 def normalize(fisher_vector):
@@ -115,7 +116,7 @@ def fisher_vector(samples, means, covs, w):
     # samples = pca_obj.transform(samples)
     s0, s1, s2 = likelihood_statistics(samples, means, covs, w)
     T = samples.shape[0]
-    covs = np.float32([np.diagonal(covs[k])
+    covs = np.float([np.diagonal(covs[k])
                        for k in range(0, covs.shape[0])])
     a = fisher_vector_weights(s0, s1, s2, means, covs, w, T)
     b = fisher_vector_means(s0, s1, s2, means, covs, w, T)
@@ -169,11 +170,11 @@ def generate_gmm(input_folder, N):
     # Throw away gaussians with weights that are too small:
     # th = 1.0 / N
     th = 0
-    means = np.float32(
+    means = np.float(
         [m for k, m in zip(range(0, len(weights)), means) if weights[k] > th])
-    covs = np.float32(
+    covs = np.float(
         [m for k, m in zip(range(0, len(weights)), covs) if weights[k] > th])
-    weights = np.float32(
+    weights = np.float(
         [m for k, m in zip(range(0, len(weights)), weights) if weights[k] > th])
 
     np.save("means.gmm", means)
@@ -193,10 +194,10 @@ def get_fisher_vectors_from_folder(folder, gmm):
         if(temp is not None):
             # print(temp)
             # print(os.path.basename(file))
-            res[os.path.basename(file)] = np.float32(
+            res[os.path.basename(file)] = np.float(
                 fisher_vector(temp, *gmm))
     return res
-    # return np.float32([fisher_vector(image_descriptors(file), *gmm) for file in files])
+    # return np.float([fisher_vector(image_descriptors(file), *gmm) for file in files])
 
 
 def fisher_features(folder, gmm):
@@ -219,7 +220,7 @@ def get_image_mapping_from_folder(folder):
     for file in files:
         res[os.path.basename(file)] = os.path.abspath(file)
     return res
-    # return np.float32([fisher_vector(image_descriptors(file), *gmm) for file in files])
+    # return np.float([fisher_vector(image_descriptors(file), *gmm) for file in files])
 
 
 def get_image_mappings(folder):
@@ -239,7 +240,7 @@ def train(gmm, features):
     '''
     print(features)
     X = np.concatenate(features.values)
-    Y = np.concatenate([np.float32([i]*len(v))
+    Y = np.concatenate([np.float([i]*len(v))
                         for i, v in zip(range(0, len(features)), features.values())])
 
     clf = svm.SVC()
@@ -257,7 +258,7 @@ def success_rate(classifier, features):
     '''
     print("Applying the classifier...")
     X = np.concatenate(np.array(features.values()))
-    Y = np.concatenate([np.float32([i]*len(v))
+    Y = np.concatenate([np.float([i]*len(v))
                         for i, v in zip(range(0, len(features)), features.values())])
     res = float(
         sum([a == b for a, b in zip(classifier.predict(X), Y)])) / len(Y)
@@ -308,40 +309,45 @@ def get_word_string(path):
     pass
 
 
-def MAPScore(query_path, word_strings_dict, fisher_features, gmm, image_mapping_dict):
+def MAPScore(query_path, word_strings_dict, fisher_features, gmm, image_mapping_dict, show_img_flag = False):
     '''
     Getting the MAP score for the given image query
     '''
-    img = plt.imread(query_path)
-    imgplot = plt.imshow(img)
-    plt.show()
+    if(show_img_flag):
+        img = plt.imread(query_path)
+        imgplot = plt.imshow(img)
+        plt.show()
     query_sift_features = image_descriptors(query_path)
-    print(fisher_features["a01-000u-00-01.png"])
+    if(query_sift_features is None):
+        return 0
+    # print("path: {0}".format(query_path))
+    # print(query_sift_features.shape)
     temp = copy.deepcopy(gmm)
     query_FV = fisher_vector(query_sift_features, *temp)
-    print(query_FV)
+    # print(query_FV)
     query_FV = query_FV.reshape(1, -1)
     FV_values = np.array(list(fisher_features.values()))
     FV_keys = np.array(list(fisher_features.keys()))
     similarity_score = cosine_similarity(query_FV, FV_values)
-    print(similarity_score.shape)
+    # print(similarity_score.shape)
     max_index = np.argmax(similarity_score)
     top_5_indices = similarity_score.flatten().argsort()[-5:][::-1]
-    print("top 5 indices {0}".format(top_5_indices))
-    for i in top_5_indices:
-        match_img_path = image_mapping_dict[FV_keys[i]]
-        print("Matching image path: {0}".format(match_img_path))
-        img = plt.imread(match_img_path)
-        imgplot = plt.imshow(img)
-        plt.show()
+    if(show_img_flag):
+        print("top 5 indices {0}".format(top_5_indices))
+        for i in top_5_indices:
+            match_img_path = image_mapping_dict[FV_keys[i]]
+            print("Matching image path: {0}".format(match_img_path))
+            img = plt.imread(match_img_path)
+            imgplot = plt.imshow(img)
+            plt.show()
     query_string = word_strings_dict[os.path.basename(query_path)]
     word_vals = np.array([word_strings_dict[your_key]
                           for your_key in fisher_features.keys()])
     word_vals = word_vals.flatten()
     y_true = np.array([[int(1) if s == query_string else int(0)
                         for s in word_vals]])
-    map = label_ranking_average_precision_score(y_true, similarity_score)
-    return map
+    mape = label_ranking_average_precision_score(y_true, similarity_score)
+    return mape
 
 
 def get_args():
@@ -361,9 +367,7 @@ def get_args():
     return args
 
 
-
 ####################################     Main     #####################################
-
 working_folder = "/home/praveen/Desktop/iiith-assignments/CV/project/kaggle_data_35k/a01"
 dir_xml = "/home/praveen/Desktop/iiith-assignments/CV/project/kaggle_data_35k/xml_testing/"
 load_folder = "/home/praveen/Desktop/iiith-assignments/CV/project/35k_weights"
@@ -401,10 +405,30 @@ else:
 image_mapping_dict = get_image_mappings(working_folder)
 scores = []
 while(True):
-    query_path = input("Enter query image path: ")
-    if(query_path == "break"):
+    query_type = input(
+        "Press 1 for test of multiple images\nPress 2 for single image\nPress 0 to exit\n")
+    if(int(query_type) == 0):
         break
-    score = MAPScore(query_path, word_strings_dict,
-                     FV_features, gmm, image_mapping_dict)
-    scores.append(score)
-    print(score)
+    if(int(query_type) == 1):
+        score_list = []
+        test_data_path = input("Enter query images folder path: ")
+        folders = glob.glob(test_data_path + "/*")
+        count = 0
+        for folder in folders:
+            image_paths = glob.glob(folder + "/*.png")
+            for img_path in image_paths:
+                count += 1
+                # print("count: {0}".format(count))
+                score = MAPScore(img_path, word_strings_dict,
+                                 FV_features, gmm, image_mapping_dict, False)
+                score_list.append(score)
+        score_list = np.array(score_list)
+        print("MAP Score: {0}".format(np.mean(score_list)))
+    else:
+        query_path = input("Enter query image path: ")
+        if(query_path == "break"):
+            break
+        score = MAPScore(query_path, word_strings_dict,
+                         FV_features, gmm, image_mapping_dict, True)
+        scores.append(score)
+        print("MAP Score: {0}".format(score))
