@@ -18,9 +18,18 @@ import pickle
 import copy
 import matplotlib.pyplot as plt
 import multiprocessing as mp
+from functools import partial
+import phow
 
 pca_obj = None
 load_gmm_flag = False
+
+
+def calcGaussian(descriptors_i):
+    N=16
+    g = mixture.GaussianMixture(n_components=N, max_iter=100)
+    g.fit(descriptors_i)
+    return (g.means_,g.covariances_,g.weights_)
 
 def dictionary(descriptors, desc_mapping, N):
     '''
@@ -29,15 +38,21 @@ def dictionary(descriptors, desc_mapping, N):
     means_ = []
     covariances_ = []
     weights_ = []
+
+    pool = mp.Pool(mp.cpu_count())
+    gmms = pool.map(calcGaussian, [np.asarray(descriptors[desc_mapping == i]) for i in range(max(desc_mapping)+1)])
+    pool.close()
+    means_ = [gmm[0] for gmm in gmms]
+    covariances_ = [gmm[1] for gmm in gmms]
+    weights_ = [gmm[2] for gmm in gmms]
     ###Parallel here
-    print(desc_mapping.shape)
-    for i in range(max(desc_mapping)+1):
-        g = mixture.GaussianMixture(n_components=N, max_iter=30, n_init=2)
-        descriptors_i = np.asarray(descriptors[desc_mapping == i])
-        g.fit(descriptors_i)
-        means_.append(g.means_)
-        covariances_.append(g.covariances_)
-        weights_.append(g.weights_)
+    # for i in range(max(desc_mapping)+1):
+    #     g = mixture.GaussianMixture(n_components=N, max_iter=60)
+    #     descriptors_i = np.asarray(descriptors[desc_mapping == i])
+    #     g.fit(descriptors_i)
+    #     means_.append(g.means_)
+    #     covariances_.append(g.covariances_)
+    #     weights_.append(g.weights_)
     return np.array(means_), np.array(covariances_), np.array(weights_)
 
 def findKeyPoints(img, window=8, radius=16):
@@ -62,35 +77,44 @@ def findFeatures(gray, keypoints):
     kp, des = sift.compute(gray, keypoints)
     return kp, des
 
-def splitImage(im, M=6, N=2):
+def splitImage(im, M=2, N=6):
     im = im.copy()
     # print("image shape: {0}".format(im.shape))
-    x_offset = math.ceil(im.shape[0]*1.00/M)
-    y_offset = math.ceil(im.shape[1]*1.00/N)
-    tiles = [im[x:min(x+x_offset,im.shape[0]),y:min(y+y_offset,im.shape[1])] for x in range(0,im.shape[0],x_offset)
-                                                    for y in range(0,im.shape[1],y_offset)]
+    x_offset = math.ceil(im.shape[1]*1.00/N)
+    y_offset = math.ceil(im.shape[0]*1.00/M)
+    tiles = [im[y:min(y+y_offset,im.shape[0]),x:min(x+x_offset,im.shape[1])] for y in range(0,im.shape[0],y_offset)
+                                                    for x in range(0,im.shape[1],x_offset)]
     return tiles
 
 def getImgSegmentDescriptors(img1):
     '''
     Getting the interest points in the image segment
     '''
-    windows = [2,4,6,8,10,12]
-    # windows = [2]
-    radius = 16
+    # sizes = [2,4,6,8,10,12]
+    sizes = [6]
     descriptors = None
     for i in range(len(windows)):
-        key_points_window = findKeyPoints(img1, windows[i], radius)
-        if(key_points_window is None):
+        # key_points_window = findKeyPoints(img1, windows[i], radius)
+        # if(key_points_window is None):
+        #     continue
+        # kp1, des1 = findFeatures(img1, key_points_window)
+        kp1, des1 = phow.vl_phow(img1, color="grey")
+        if(len(kp1) == 0):
             continue
-        kp1, des1 = findFeatures(img1, key_points_window)
+        # print("In Get segment descriptors, SIFT")
+        # print(des1)
         # x,y = kp1[i].pt
         # x_enriched = (x-img1.shape[0]/2)/img1.shape[0]
         # y_enriched = (y-img1.shape[1]/2)/img1.shape[1]
         # print("descriptor shape: {0}, {1}".format(des1.shape, len(kp1)))
-        des1 = np.concatenate((des1,[[(point.pt[0]-img1.shape[0]/2)*1.00/img1.shape[0],
-                            (point.pt[1]-img1.shape[1]/2)*1.00/img1.shape[1]] for point in kp1]), axis=1)
+        # des1 = np.concatenate((des1,[[(point.pt[0]-img1.shape[0]/2)*1.00/img1.shape[0],
+        #                     (point.pt[1]-img1.shape[1]/2)*1.00/img1.shape[1]] for point in kp1]), axis=1)
         # print(des1.shape)
+        kp1[:,1] = (kp1[:,1]-img1.shape[1]/2)/img1.shape[1]
+        kp1[:,0] = (kp1[:,0]-img1.shape[0]/2)/img1.shape[0]
+        print("descriptor shape: {0}, {1}".format(des1.shape, len(kp1)))
+        des1 = np.concatenate((des1,kp1), axis=1)
+        print(des1.shape)
         if(descriptors is None):
             descriptors = des1
         np.concatenate((descriptors,des1),axis=0) 
@@ -101,7 +125,7 @@ def image_descriptors(file):
     Computing the dense sift matching
     '''
     img1 = cv2.imread(file)
-    img_segments = splitImage(img1, 6, 2)
+    img_segments = splitImage(img1, 2, 6)
     # print("No. of segments: {0}".format(len(img_segments)))
     mapping = []
     descriptors = None
@@ -215,11 +239,11 @@ def fisher_vector(words_with_mapping, means, covs, w):
     Building the FV for a image, sample denotes a list of SIFT feature vectors
     '''
     # global pca_obj
-    words = np.array([word[0] for word in words_with_mapping])
-    desc_mapping = np.array([word[1] for word in words_with_mapping])
+    words = words_with_mapping[0]
+    desc_mapping = words_with_mapping[1]
     words = reduceDimensions(words)
     # samples = pca_obj.transform(samples)
-    fv = []
+    fv = None
     for i in range(max(desc_mapping)+1):
         samples = np.asarray(words[desc_mapping == i])
         means_i = means[i]
@@ -234,10 +258,11 @@ def fisher_vector(words_with_mapping, means, covs, w):
         c = fisher_vector_sigma(s0, s1, s2, means_i, covs_i, w_i, T)
         fv_i = np.concatenate(
             [np.concatenate(a), np.concatenate(b), np.concatenate(c)])
-        fv_i = normalize(fv_i)
-        fv.append(fv_i)
-    # print("Fv")
-    # print(fv)
+        if(fv is None):
+            fv = fv_i
+        else:
+            fv = np.concatenate((fv,fv_i),axis = 0)
+    fv = normalize(fv)
     return np.array(fv)
 
 
@@ -251,14 +276,22 @@ def reduceDimensions(words):
     # if(load_gmm_flag):
     #     with open("/home/praveen/Desktop/iiith-assignments/CV/project/35k_weights/pca_dump", 'rb') as handle:
     #         pca_obj = pickle.load(handle)
+    # try:
+    #     if(pca_obj is None):
+    #         pca = PCA(n_components=62)
+    #         pca_obj = pca.fit(words[:,:-2])
+    #         with open("./pca_dump", 'wb') as handle:
+    #             pickle.dump(pca_obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    #     res = pca_obj.transform(words[:,:-2])
+    #     res = np.concatenate((res,words[:,-2:]),axis=1)
+    #     return res
     try:
         if(pca_obj is None):
-            pca = PCA(n_components=62)
-            pca_obj = pca.fit(words[:,:-2])
+            pca = PCA(n_components=64)
+            pca_obj = pca.fit(words)
             with open("./pca_dump", 'wb') as handle:
                 pickle.dump(pca_obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        res = pca_obj.transform(words[:,:-2])
-        res = np.concatenate((res,words[:,-2:]),axis=1)
+        res = pca_obj.transform(words)
         return res
     except:
         print("error in Reduce Dimensions")
@@ -277,8 +310,11 @@ def generate_gmm(input_folder, N):
     '''
     start = timeit.default_timer()
     ### Parallel
-    words_with_mapping = [folder_descriptors(folder)
-                            for folder in glob.glob(input_folder + '/*')]
+    pool = mp.Pool(mp.cpu_count())
+    # words_with_mapping = [folder_descriptors(folder)
+    #                         for folder in glob.glob(input_folder + '/*')]
+    words_with_mapping = pool.map(folder_descriptors, [folder for folder in glob.glob(input_folder + '/*')])
+    pool.close()
     words = np.concatenate([word[0] for word in words_with_mapping])
     word_mapping = np.concatenate([word[1] for word in words_with_mapping])
     print("shape of words: {0}, mapping: {1}".format(words.shape, word_mapping.shape))
@@ -287,22 +323,24 @@ def generate_gmm(input_folder, N):
     words = reduceDimensions(words)
     print("Training GMM of size", N)
     means, covs, weights = dictionary(words, word_mapping, N)
-    # Throw away gaussians with weights that are too small:
-    # th = 1.0 / N
-    # th = 0
-    # means = np.float32(
-    #     [m for k, m in zip(range(0, len(weights)), means) if weights[k] > th])
-    # covs = np.float32(
-    #     [m for k, m in zip(range(0, len(weights)), covs) if weights[k] > th])
-    # weights = np.float32(
-    #     [m for k, m in zip(range(0, len(weights)), weights) if weights[k] > th])
+    #Throw away gaussians with weights that are too small:
+    th = 1.0 / N
+    th = 0
+    for i in range(len(means)):
+        means[i] = np.float32(
+            [m for k, m in zip(range(0, len(weights[i])), means[i]) if weights[i][k] > th])
+        covs[i] = np.float32(
+            [m for k, m in zip(range(0, len(weights[i])), covs[i]) if weights[i][k] > th])
+        weights[i] = np.float32(
+            [m for k, m in zip(range(0, len(weights[i])), weights[i]) if weights[i][k] > th])
     np.save("means.gmm", means)
     np.save("covs.gmm", covs)
     np.save("weights.gmm", weights)
     return means, covs, weights
 
 
-def get_fisher_vectors_from_folder(folder, gmm):
+# # changed definition initial (folder, gmm)
+def get_fisher_vectors_from_folder(gmm, folder):
     '''
     Getting the FVs of all the images in the folder
     '''
@@ -325,11 +363,18 @@ def fisher_features(folder, gmm):
     '''
     folders = glob.glob(folder + "/*")
     res = {}
+    def temp_fun(f, gmm):
+        return get_fisher_vectors_from_folder(gmm, f)
     ## Parallel
     for f in folders:
-        res.update(get_fisher_vectors_from_folder(f, gmm))
+        res.update(get_fisher_vectors_from_folder(gmm,f))
+    # temp_fun = partial(get_fisher_vectors_from_folder, gmm)
+    # pool = mp.Pool(mp.cpu_count())
+    # results = pool.map(temp_fun, [f for f in folders])
+    # pool.close()
+    # for result in results:
+    #     res.update(result)
     return res
-
 
 def get_image_mapping_from_folder(folder):
     '''
@@ -508,7 +553,7 @@ gmm = load_gmm(load_folder) if load_gmm_flag else generate_gmm(
     working_folder, no_gaussians)
 stop = timeit.default_timer()
 print('Time taken for training GMM: ', stop - start)
-print("gmm: {0}".format(gmm))
+# print("gmm: {0}".format(gmm))
 
 FV_features = None
 if(load_gmm_flag):
