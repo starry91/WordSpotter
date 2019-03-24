@@ -38,21 +38,14 @@ def dictionary(descriptors, desc_mapping, N):
     means_ = []
     covariances_ = []
     weights_ = []
-
+    print("max desc mapping: {0}".format(max(desc_mapping)))
     pool = mp.Pool(mp.cpu_count())
     gmms = pool.map(calcGaussian, [np.asarray(descriptors[desc_mapping == i]) for i in range(max(desc_mapping)+1)])
     pool.close()
+    pool.join()
     means_ = [gmm[0] for gmm in gmms]
     covariances_ = [gmm[1] for gmm in gmms]
     weights_ = [gmm[2] for gmm in gmms]
-    ###Parallel here
-    # for i in range(max(desc_mapping)+1):
-    #     g = mixture.GaussianMixture(n_components=N, max_iter=60)
-    #     descriptors_i = np.asarray(descriptors[desc_mapping == i])
-    #     g.fit(descriptors_i)
-    #     means_.append(g.means_)
-    #     covariances_.append(g.covariances_)
-    #     weights_.append(g.weights_)
     return np.array(means_), np.array(covariances_), np.array(weights_)
 
 def findKeyPoints(img, window=8, radius=16):
@@ -92,46 +85,30 @@ def getImgSegmentDescriptors(img1):
     '''
     # sizes = [2,4,6,8,10,12]
     sizes = [6]
-    descriptors = None
-    for i in range(len(windows)):
-        # key_points_window = findKeyPoints(img1, windows[i], radius)
-        # if(key_points_window is None):
-        #     continue
-        # kp1, des1 = findFeatures(img1, key_points_window)
-        kp1, des1 = phow.vl_phow(img1, color="grey")
-        if(len(kp1) == 0):
-            continue
-        # print("In Get segment descriptors, SIFT")
-        # print(des1)
-        # x,y = kp1[i].pt
-        # x_enriched = (x-img1.shape[0]/2)/img1.shape[0]
-        # y_enriched = (y-img1.shape[1]/2)/img1.shape[1]
-        # print("descriptor shape: {0}, {1}".format(des1.shape, len(kp1)))
-        # des1 = np.concatenate((des1,[[(point.pt[0]-img1.shape[0]/2)*1.00/img1.shape[0],
-        #                     (point.pt[1]-img1.shape[1]/2)*1.00/img1.shape[1]] for point in kp1]), axis=1)
-        # print(des1.shape)
-        kp1[:,1] = (kp1[:,1]-img1.shape[1]/2)/img1.shape[1]
-        kp1[:,0] = (kp1[:,0]-img1.shape[0]/2)/img1.shape[0]
-        print("descriptor shape: {0}, {1}".format(des1.shape, len(kp1)))
-        des1 = np.concatenate((des1,kp1), axis=1)
-        print(des1.shape)
-        if(descriptors is None):
-            descriptors = des1
-        np.concatenate((descriptors,des1),axis=0) 
-    return descriptors
+    kp1, des1 = phow.vl_phow(img1, color="gray")
+    kp1[:,1] = (kp1[:,1]-img1.shape[1]/2)/img1.shape[1]
+    kp1[:,0] = (kp1[:,0]-img1.shape[0]/2)/img1.shape[0]
+    print("descriptor shape: {0}, len of centers: {1}".format(des1.shape, len(kp1)))
+    assert(len(kp1) != 0)
+    des1 = np.concatenate((des1,kp1), axis=1)
+    return des1
 
 def image_descriptors(file):
     '''
     Computing the dense sift matching
     '''
     img1 = cv2.imread(file)
-    img_segments = splitImage(img1, 2, 6)
+    img_segments = splitImage(img1, 1, 1)
     # print("No. of segments: {0}".format(len(img_segments)))
     mapping = []
     descriptors = None
     i = 0
     for img in img_segments:
-        temp_descriptors = getImgSegmentDescriptors(img)
+        try:
+            temp_descriptors = getImgSegmentDescriptors((img*1.00)/255)
+        except:
+            i = i + 1
+            continue
         if(descriptors is None):
             descriptors = temp_descriptors
         else:
@@ -172,14 +149,23 @@ def folder_descriptors(folder):
             continue
         # print("in folder desc-> getting desc for {0}".format(file))
         desc, temp_map = image_descriptors(file)
+        if(desc is None):
+            print("yes")
+        else:
+            print("no")
+        print(type(desc))
+        print(mp.current_process().name, desc)
+        print(temp_map)
         # print(desc.shape, temp_map.shape)
-        if desc is not None:
-            if res is not None:
+        if(len(temp_map) != 0):
+            if(res is not None):
+                print("res.shape: {0}, dec.shape: {1}".format(res.shape, desc.shape), mp.current_process().name)
                 res = np.concatenate((res,desc),axis=0)
                 mapping = np.concatenate((mapping,temp_map),axis=0)
             else:
                 res = desc
                 mapping = temp_map
+    mapping = mapping.astype(int)
     print(res, mapping)
     return (res,mapping)
 
@@ -198,7 +184,10 @@ def likelihood_statistics(samples, means, covs, weights):
     Calculating the likelihood statistics to build the FV
     '''
     gaussians, s0, s1, s2 = {}, {}, {}, {}
-
+    print("means")
+    print(means)
+    print("covariances")
+    print(covs)
     g = [multivariate_normal(mean=means[k], cov=covs[k],
                              allow_singular=False) for k in range(0, len(weights))]
     for index, x in enumerate(samples):
@@ -276,23 +265,23 @@ def reduceDimensions(words):
     # if(load_gmm_flag):
     #     with open("/home/praveen/Desktop/iiith-assignments/CV/project/35k_weights/pca_dump", 'rb') as handle:
     #         pca_obj = pickle.load(handle)
-    # try:
-    #     if(pca_obj is None):
-    #         pca = PCA(n_components=62)
-    #         pca_obj = pca.fit(words[:,:-2])
-    #         with open("./pca_dump", 'wb') as handle:
-    #             pickle.dump(pca_obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    #     res = pca_obj.transform(words[:,:-2])
-    #     res = np.concatenate((res,words[:,-2:]),axis=1)
-    #     return res
     try:
         if(pca_obj is None):
-            pca = PCA(n_components=64)
-            pca_obj = pca.fit(words)
+            pca = PCA(n_components=62)
+            pca_obj = pca.fit(words[:,:-2])
             with open("./pca_dump", 'wb') as handle:
                 pickle.dump(pca_obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        res = pca_obj.transform(words)
+        res = pca_obj.transform(words[:,:-2])
+        res = np.concatenate((res,words[:,-2:]),axis=1)
         return res
+    # try:
+    #     if(pca_obj is None):
+    #         pca = PCA(n_components=64)
+    #         pca_obj = pca.fit(words)
+    #         with open("./pca_dump", 'wb') as handle:
+    #             pickle.dump(pca_obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    #     res = pca_obj.transform(words)
+    #     return res
     except:
         print("error in Reduce Dimensions")
         print("words shape: {0}".format(words.shape))
@@ -315,6 +304,7 @@ def generate_gmm(input_folder, N):
     #                         for folder in glob.glob(input_folder + '/*')]
     words_with_mapping = pool.map(folder_descriptors, [folder for folder in glob.glob(input_folder + '/*')])
     pool.close()
+    pool.join()
     words = np.concatenate([word[0] for word in words_with_mapping])
     word_mapping = np.concatenate([word[1] for word in words_with_mapping])
     print("shape of words: {0}, mapping: {1}".format(words.shape, word_mapping.shape))
@@ -348,7 +338,7 @@ def get_fisher_vectors_from_folder(gmm, folder):
     res = {}
     for file in files:
         temp = image_descriptors(file)
-        if(temp is not None):
+        if(len(temp[1]) != 0):
             # print(temp)
             # print(os.path.basename(file))
             res[os.path.basename(file)] = np.float32(
@@ -372,6 +362,7 @@ def fisher_features(folder, gmm):
     # pool = mp.Pool(mp.cpu_count())
     # results = pool.map(temp_fun, [f for f in folders])
     # pool.close()
+    # pool.join()
     # for result in results:
     #     res.update(result)
     return res
@@ -543,7 +534,7 @@ def get_args():
 
 working_folder = "kaggle_data_subset/a01"
 dir_xml = "kaggle_data_subset/xml_testing/"
-load_folder = "kaggle_data_subset/weights/"
+load_folder = "kaggle_data_subset/weights"
 
 print(working_folder)
 no_gaussians = 16

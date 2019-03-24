@@ -17,7 +17,7 @@ def vl_imsmooth(img, sigma):
     return gaussian_filter(img, sigma)
 
 def vl_phow(im,
-            verbose=True,
+            verbose=False,
             fast=True,
             sizes=[4, 6, 8, 10],
             step=2,
@@ -104,14 +104,10 @@ def vl_phow(im,
                                       fast=dsiftOpts.fast,
                                       verbose=dsiftOpts.verbose,
                                       norm=dsiftOpts.norm,)
-                                     # bounds=[off, off, maxsize, maxsize])
-            # print("#$%#$%#",f_temp.shape, d_temp.shape)
-            # print("an entry of f_temp", f_temp[:1,:])
             frames.append(f_temp.T)
             descrs.append(d_temp.T)
         frames = array(frames)
         descrs = array(descrs)
-        # print("After loop frames shape: {0}, descriptor shape:{1}".format(frames.shape, descrs.shape))
         d_new_shape = [descrs.shape[0] * descrs.shape[1], descrs.shape[2]]
         descrs = descrs.reshape(d_new_shape)
         # remove low contrast descriptors
@@ -123,16 +119,11 @@ def vl_phow(im,
             contrast = mean([frames[0][2, :], frames[1][2, :], frames[2][2, :]], 0)
         else:
             raise ValueError('Color option ' + str(opts.color) + ' not recognized')
-        #print("frame shape", frames.shape)
-        # print("frames [0] shape", frames[0][2,:].shape)
-        # print("frames [1] shape", frames[1][2, :].shape)
-        #print(descrs.shape)
-        #print(contrast.shape)
-        descrs[:, contrast < opts.contrastthreshold] = 0
-
+        descrs = descrs[:, contrast > opts.contrastthreshold]
+        frames = frames[0][:, contrast > opts.contrastthreshold]
         # save only x,y, and the scale
-        frames_temp = array(frames[0][0:3, :])
-        padding = array(size_of_spatial_bins * ones(frames[0][0].shape))
+        frames_temp = array(frames[0:3, :])
+        padding = array(size_of_spatial_bins * ones(frames[0].shape))
         frames_to_add = vstack([frames_temp, padding])
         # print("Shape of frame for each window", frames_to_add.shape)
         # print("Shape of descriptors for each window", descrs.shape)
