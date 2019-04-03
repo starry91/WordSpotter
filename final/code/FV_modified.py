@@ -54,7 +54,7 @@ from cyvlfeat.gmm import gmm as GaussianMixture
 from cyvlfeat.fisher import fisher as FisherVector
 
 pca_obj = None
-load_gmm_flag = False
+load_gmm_flag = True
 svm_obj = None
 
 def calcGaussian(descriptors_i):
@@ -619,10 +619,8 @@ if __name__ == "__main__":
     cca_train_data_path = "dataset/ccaTrain/"
     test_data_path = "dataset/test/"
     xml_data_path = "dataset/xml/"
-    weights_data_path = "dataset/weights_5/"
-    model_data_dump_path = "dataset/modelsdump_5/"
-    weights_data_path1 = "dataset/weights/"
-    model_data_dump_path1 = "dataset/modelsdump/"
+    weights_data_path = "dataset/weights/"
+    model_data_dump_path = "dataset/modelsdump/"
 
     # gmm_train_data_path = "dummydataset1/gmmTrain/"
     # svm_train_data_path = "dummydataset1/SVMTrain/"
@@ -639,7 +637,7 @@ if __name__ == "__main__":
     no_gaussians = 16
     print("no. of weights {0}".format(no_gaussians))
     start = timeit.default_timer()
-    gmm = load_gmm(opts.weights_data_path) if not load_gmm_flag else generate_gmm(
+    gmm = load_gmm(opts.weights_data_path) if load_gmm_flag else generate_gmm(
         opts, no_gaussians)
     # print(gmm)
     stop = timeit.default_timer()
@@ -656,7 +654,7 @@ if __name__ == "__main__":
     print("Getting Fisher Vector encoding of training data")
     ### loading svm_fv_data
     start = timeit.default_timer()
-    if(not load_gmm_flag):
+    if(load_gmm_flag):
         with open(opts.weights_data_path + "svm_train_FV_dump", 'rb') as handle:
             svm_FV_features = pickle.load(handle)
         with open(opts.weights_data_path + "cca_train_FV_dump", 'rb') as handle:
@@ -691,7 +689,7 @@ if __name__ == "__main__":
     ### img - str repr
     start = timeit.default_timer()
     word_strings_dict = None
-    if(not load_gmm_flag):
+    if(load_gmm_flag):
         with open(opts.xml_data_path + "word_string_dict_dump", 'rb') as handle:
             word_strings_dict = pickle.load(handle)
     else:
@@ -739,7 +737,7 @@ if __name__ == "__main__":
             svm_obj = pickle.load(handle)
 
     if(svm_obj is None):
-        clf = SGDClassifier(alpha=0.00001, eta0=0.003, tol=1e-5,class_weight="balanced", n_jobs=-1)
+        clf = SGDClassifier(alpha=0.0001, eta0=0.003, tol=1e-5,class_weight="balanced", n_jobs=-1)
         svm_obj = OneVsRestClassifier(clf, n_jobs=-1)
         svm_obj.fit(X, Y)
         with open(opts.model_data_dump_path + "svm_obj", 'wb') as handle:
